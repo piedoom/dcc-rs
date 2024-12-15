@@ -7,14 +7,14 @@
 
 pub use bitvec;
 use bitvec::prelude::*;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
 
 pub mod packets;
 
 const BUFFER_SIZE: usize = 24 * 8;
 type BufferType = BitArr!(for 24*8, in u8, Msb0);
-const ZERO_MICROS: u32 = 100;
-const ONE_MICROS: u32 = 58;
+const ZERO_MICROS: u32 = 100; // ZERO is 200us in total
+const ONE_MICROS: u32 = 58; // ONE is 116us in total
 
 /// Error types returned by this crate
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -165,8 +165,9 @@ impl<P: OutputPin> DccInterruptHandler<P> {
 
 #[cfg(test)]
 mod test {
+    use embedded_hal::digital::{ErrorType, StatefulOutputPin};
+
     use super::*;
-    use embedded_hal::digital::v2::*;
     use std::convert::Infallible;
 
     #[derive(Default)]
@@ -174,9 +175,11 @@ mod test {
         state: bool,
     }
 
-    impl OutputPin for MockPin {
+    impl ErrorType for MockPin {
         type Error = Infallible;
+    }
 
+    impl OutputPin for MockPin {
         #[inline(always)]
         fn set_high(&mut self) -> Result<(), Self::Error> {
             self.state = true;
@@ -192,12 +195,11 @@ mod test {
 
     impl StatefulOutputPin for MockPin {
         #[inline(always)]
-        fn is_set_high(&self) -> Result<bool, Self::Error> {
+        fn is_set_high(&mut self) -> Result<bool, Self::Error> {
             Ok(self.state)
         }
-
         #[inline(always)]
-        fn is_set_low(&self) -> Result<bool, Self::Error> {
+        fn is_set_low(&mut self) -> Result<bool, Self::Error> {
             Ok(!self.state)
         }
     }

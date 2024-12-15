@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! This module provides types and serialisers for each "service mode"
+//! This module provides types and serializers for each "service mode"
 //! packet type defined by the NMRA standard.
 //!
-//! <https://www.nmra.org/sites/default/files/standards/sandrp/pdf/S-9.2.3_2012_07.pdf>
+//! <https://www.nmra.org/sites/default/files/standards/sandrp/DCC/S/S-9.2.3_2012_07.pdf>
 
-use super::{Error, Result, SerialiseBuffer};
+use super::{Error, Packet, Result, SerializeBuffer};
 
 #[derive(Copy, Clone)]
 #[allow(missing_docs)]
@@ -19,24 +19,26 @@ pub enum Operation {
 /// "A packet sequence sent to guarantee the contents of the page register"
 pub struct PagePreset;
 
+impl Packet for PagePreset {}
+
 impl PagePreset {
-    /// Serialise the Instruction packet into the provided bufffer. Returns the
+    /// Serialize the Instruction packet into the provided bufffer. Returns the
     /// number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
-        super::serialise(&[0b01111101, 0b00000001, 0b01111100], buf)
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
+        <Self as Packet>::serialize(&[0b01111101, 0b00000001, 0b01111100], buf)
     }
 }
 
 /// Instruction types supported by the `Instruction` packet:
-/// * `VerifyByte`: decoder compares its recorded CV value against the provided
-/// data byte and responds with an acknowledgement if they match
-/// * `WriteCvByte`: decoder writes the provided data byte into the specified
-/// CV slot and may respond with an acknowledgement on successful write
-/// * `VerifyCvBit`: Compare the given bit with the bit in the specified
-/// position within the CV and repond with an acknowledgement if they match
-/// * `WriteCvBit`: Write the given bit into the specified position within the
-/// specified CV. Decoder may respond with an acknowledgement on success
+///     * `VerifyByte`: decoder compares its recorded CV value against the provided
+///     data byte and responds with an acknowledgement if they match
+///     * `WriteCvByte`: decoder writes the provided data byte into the specified
+///     CV slot and may respond with an acknowledgement on successful write
+///     * `VerifyCvBit`: Compare the given bit with the bit in the specified
+///     position within the CV and repond with an acknowledgement if they match
+///     * `WriteCvBit`: Write the given bit into the specified position within the
+///     specified CV. Decoder may respond with an acknowledgement on success
 #[derive(Copy, Clone)]
 #[allow(missing_docs)]
 pub enum InstructionType {
@@ -53,16 +55,18 @@ pub struct Instruction {
     cv_address: u16,
 }
 
+impl Packet for Instruction {}
+
 impl Instruction {
     /// Create a builder for the Instruction packet
     pub fn builder() -> InstructionBuilder {
         InstructionBuilder::default()
     }
 
-    /// Serialise the Instruction packet into the provided bufffer. Returns the
+    /// Serialize the Instruction packet into the provided bufffer. Returns the
     /// number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         // write the first two bits of CV address into this byte now and fill
         // in the packet type later
         let mut type_and_start_of_address = 0x70;
@@ -103,7 +107,7 @@ impl Instruction {
             }
         };
 
-        super::serialise(
+        <Self as Packet>::serialize(
             &[
                 type_and_start_of_address,
                 rest_of_address,
@@ -188,6 +192,8 @@ pub enum AddressOnly {
     Verify { address: u8 },
 }
 
+impl Packet for AddressOnly {}
+
 impl AddressOnly {
     /// Create a packet instructing the decoder to write the specified address
     /// into CV1. The decoder may respond with an acknowledgement on success.
@@ -209,10 +215,10 @@ impl AddressOnly {
         }
     }
 
-    /// Serialise the Instruction packet into the provided bufffer. Returns the
+    /// Serialize the Instruction packet into the provided bufffer. Returns the
     /// number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         let mut instr = 0b0111_0000;
         let address = match self {
             AddressOnly::Write { address } => {
@@ -221,7 +227,7 @@ impl AddressOnly {
             }
             AddressOnly::Verify { address } => *address,
         };
-        super::serialise(&[instr, address, instr ^ address], buf)
+        <Self as Packet>::serialize(&[instr, address, instr ^ address], buf)
     }
 }
 
@@ -234,6 +240,8 @@ pub struct PhysicalRegister {
     register: u8,
     value: u8,
 }
+
+impl Packet for PhysicalRegister {}
 
 impl PhysicalRegister {
     /// Address (CV 1)
@@ -258,10 +266,10 @@ impl PhysicalRegister {
         PhysicalRegisterBuilder::default()
     }
 
-    /// Serialise the PhysicalRegister packet into the provided bufffer. Returns
+    /// Serialize the PhysicalRegister packet into the provided buffer. Returns
     /// the number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         let mut instr = 0b0111_0000;
 
         if let Operation::Write = self.operation {
@@ -270,7 +278,10 @@ impl PhysicalRegister {
 
         instr |= self.register;
 
-        super::serialise(&[instr, self.value, instr ^ self.value], buf)
+        <Self as Packet>::serialize(
+            &[instr, self.value, instr ^ self.value],
+            buf,
+        )
     }
 }
 
@@ -321,12 +332,14 @@ impl PhysicalRegisterBuilder {
 /// Reset decoder to factory-default condition
 pub struct FactoryReset;
 
+impl Packet for FactoryReset {}
+
 impl FactoryReset {
-    /// Serialise the PhysicalRegister packet into the provided bufffer. Returns
+    /// Serialize the PhysicalRegister packet into the provided bufffer. Returns
     /// the number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
-        super::serialise(&[0b01111111, 0b00001000, 0b01110111], buf)
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
+        <Self as Packet>::serialize(&[0b01111111, 0b00001000, 0b01110111], buf)
     }
 }
 
@@ -335,18 +348,23 @@ pub struct AddressQuery {
     address: u8,
 }
 
+impl Packet for AddressQuery {}
+
 impl AddressQuery {
     /// Create an `AddressQuery` packet for the given address
     pub fn address(address: u8) -> AddressQuery {
         AddressQuery { address }
     }
 
-    /// Serialise the PhysicalRegister packet into the provided bufffer. Returns
+    /// Serialize the PhysicalRegister packet into the provided bufffer. Returns
     /// the number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         let instr = 0b11111001;
-        super::serialise(&[self.address, instr, self.address ^ instr], buf)
+        <Self as Packet>::serialize(
+            &[self.address, instr, self.address ^ instr],
+            buf,
+        )
     }
 }
 
@@ -356,18 +374,23 @@ pub struct DecoderLock {
     address: u8,
 }
 
+impl Packet for DecoderLock {}
+
 impl DecoderLock {
     /// Builder for DecoderLock packet
     pub fn builder() -> DecoderLockBuilder {
         DecoderLockBuilder::default()
     }
 
-    /// Serialise the PhysicalRegister packet into the provided bufffer. Returns
+    /// Serialize the PhysicalRegister packet into the provided buffer. Returns
     /// the number of bits written or an `Error::TooLong` if the buffer has
     /// insufficient capacity
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         let instr = 0b11111001;
-        super::serialise(&[0, instr, self.address, self.address ^ instr], buf)
+        <Self as Packet>::serialize(
+            &[0, instr, self.address, self.address ^ instr],
+            buf,
+        )
     }
 }
 
@@ -406,7 +429,7 @@ mod test {
     use bitvec::prelude::*;
 
     #[test]
-    fn serialise_instruction_packet_write_byte() {
+    fn serialize_instruction_packet_write_byte() {
         // [    preamble    ] S      WWAA SAAA A AAA A_S_DD DD_DD DD_S_E EEE_E EEES
         // 1111 1111 1111 111_0 0111 1100 0001 0_111 1_0_10 10_10 10_0_1 111_1 0011
         let pkt = Instruction::builder()
@@ -416,8 +439,8 @@ mod test {
             .build()
             .unwrap();
 
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf).unwrap();
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf).unwrap();
         assert_eq!(len, 52);
 
         #[allow(clippy::unusual_byte_groupings)]
@@ -431,7 +454,7 @@ mod test {
             0b001_1_0000,   // EEES ----
         ]
         .view_bits::<Msb0>()[..len];
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..52].copy_from_bitslice(expected_arr);
 
         println!("Got:");
@@ -442,7 +465,7 @@ mod test {
     }
 
     #[test]
-    fn serialise_instruction_packet_verify_bit() {
+    fn serialize_instruction_packet_verify_bit() {
         // [    preamble    ] S      WWAA SAAA A AAA A_S_DD DK_BO OO_S_E EEE_E EEES
         // 1111 1111 1111 111_0 0111 1001 0001 0_100 1_0_11 10_11 01_0_1 011_1 0111
         let pkt = Instruction::builder()
@@ -453,8 +476,8 @@ mod test {
             .build()
             .unwrap();
 
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf).unwrap();
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf).unwrap();
         assert_eq!(len, 52);
 
         #[allow(clippy::unusual_byte_groupings)]
@@ -468,7 +491,7 @@ mod test {
             0b101_1_0000,   // EEES ----
         ]
         .view_bits::<Msb0>()[..len];
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..52].copy_from_bitslice(expected_arr);
 
         println!("Got:");
@@ -479,13 +502,13 @@ mod test {
     }
 
     #[test]
-    fn serialise_address_only_packet() {
+    fn serialize_address_only_packet() {
         // [    preamble    ] S 0111 C000 S 0DDD DDDD S EEEE EEEE S
         // 1111 1111 1111 111_0 0111 1000 0 0011 1011 0 0100 0011 1
         let pkt = AddressOnly::write(59).unwrap();
 
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf).unwrap();
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf).unwrap();
         assert_eq!(len, 43);
 
         #[allow(clippy::unusual_byte_groupings)]
@@ -498,7 +521,7 @@ mod test {
             0b11_1_0_0000,  // EES- ----
         ]
         .view_bits::<Msb0>()[..len];
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43].copy_from_bitslice(expected_arr);
 
         println!("Got:");
@@ -509,7 +532,7 @@ mod test {
     }
 
     #[test]
-    fn serialise_physical_register_packet() {
+    fn serialize_physical_register_packet() {
         // [    preamble    ] S 0111 CRRR S DDDD DDDD S EEEE EEEE S
         // 1111 1111 1111 111_0 0111 1101 0 1010 1010 0 1101 0111 1
         let pkt = PhysicalRegister::builder()
@@ -520,8 +543,8 @@ mod test {
             .build()
             .unwrap();
 
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf).unwrap();
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf).unwrap();
         assert_eq!(len, 43);
 
         #[allow(clippy::unusual_byte_groupings)]
@@ -534,7 +557,7 @@ mod test {
             0b11_1_0_0000,  // EES- ----
         ]
         .view_bits::<Msb0>()[..len];
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43].copy_from_bitslice(expected_arr);
 
         println!("Got:");

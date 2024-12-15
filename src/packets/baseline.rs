@@ -2,45 +2,43 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! This module provides types and serialisers for each "baseline"
+//! This module provides types and serializers for each "baseline"
 //! packet type defined by the NMRA standard.
 //!
 //! <https://www.nmra.org/sites/default/files/s-92-2004-07.pdf>
 
-use super::{Preamble, Result, SerialiseBuffer};
+use core::ops::Not;
+
+use super::{Address, Packet, Preamble, Result, SerializeBuffer};
 use crate::Error;
 use bitvec::prelude::*;
 
 impl Default for Preamble {
     fn default() -> Self {
+        // 16 total "1" bits
         Self(BitArray::from([0xff, 0xff]))
     }
 }
 
 /// Possible directions, usually referenced to the "forward" direction
 /// of a loco
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "use-defmt", derive(defmt::Format))]
 pub enum Direction {
     /// Forward
+    #[default]
     Forward,
     /// Backward
     Backward,
 }
 
-impl Default for Direction {
-    fn default() -> Self {
-        Self::Forward
-    }
-}
+impl Not for Direction {
+    type Output = Self;
 
-impl Direction {
-    /// Switches a direction to the opposite one
-    pub fn toggle(&mut self) {
-        use Direction::*;
-        *self = match *self {
-            Forward => Backward,
-            Backward => Forward,
+    fn not(self) -> Self::Output {
+        match self {
+            Direction::Forward => Direction::Backward,
+            Direction::Backward => Direction::Forward,
         }
     }
 }
@@ -63,9 +61,11 @@ impl Direction {
 ///  1 1111 | speed 28 (0x1f)
 /// ```
 pub struct SpeedAndDirection {
-    address: u8,
+    address: Address,
     instruction: u8,
 }
+
+impl Packet for SpeedAndDirection {}
 
 impl SpeedAndDirection {
     /// Builder interface for `SpeedAndDirection`. Use of the Builder
@@ -74,9 +74,9 @@ impl SpeedAndDirection {
         SpeedAndDirectionBuilder::default()
     }
 
-    /// Serialise the packed into the provided buffer
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
-        super::serialise(
+    /// Serialize the packed into the provided buffer
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
+        <Self as Packet>::serialize(
             &[
                 self.address,
                 self.instruction,
@@ -90,17 +90,17 @@ impl SpeedAndDirection {
 /// Builder used to construct a SpeedAndDirection packet
 #[derive(Default)]
 pub struct SpeedAndDirectionBuilder {
-    address: Option<u8>,
+    address: Option<Address>,
     speed: Option<u8>,
     e_stop: bool,
     direction: Option<Direction>,
 }
 
 impl SpeedAndDirectionBuilder {
-    /// Sets the address. In short mode the address has to be between 1
-    /// and 126. Returns `Error::InvalidAddress` if the provided address
-    /// is outside this range.
-    pub fn address(&mut self, address: u8) -> Result<&mut Self> {
+    /// Sets the address. In short mode, this must be between 1
+    /// and 126. Returns [`Error::InvalidAddress`] if the provided address
+    /// is outside of this range.
+    pub fn address(&mut self, address: Address) -> Result<&mut Self> {
         if address == 0 || address > 0x7f {
             Err(Error::InvalidAddress)
         } else {
@@ -110,7 +110,7 @@ impl SpeedAndDirectionBuilder {
     }
 
     /// Sets the speed. In short mode the speed has to be between 0 and
-    /// 16. Returns `Error::InvalidSpeed` if the provided speed is outside
+    /// 16. Returns [`Error::InvalidSpeed`] if the provided speed is outside
     /// this range.
     pub fn speed(&mut self, speed: u8) -> Result<&mut Self> {
         if speed > 28 {
@@ -133,17 +133,18 @@ impl SpeedAndDirectionBuilder {
         self
     }
 
-    /// Build a `SpeedAndDirection` packet using the provided values,
+    /// Build a [`SpeedAndDirection`] packet using the provided values,
     /// falling back to sensible defaults if not all fields have been
     /// provided.
     ///
-    /// Defaults:
+    /// # Defaults
+    ///
     /// * `speed = 0`
     /// * `direction = Forward`
     /// * `address = 3`
     /// * `headlight = false`
     pub fn build(&mut self) -> SpeedAndDirection {
-        let address = self.address.unwrap_or(3);
+        let address: Address = self.address.unwrap_or(3);
         // add the weird offset to the speed
         let speed = match self.speed {
             Some(0) | None => 0,
@@ -180,10 +181,12 @@ impl SpeedAndDirectionBuilder {
 /// locomotives stopped.
 pub struct Reset;
 
+impl Packet for Reset {}
+
 impl Reset {
-    /// Serialise the packed into the provided buffer
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
-        super::serialise(&[0x00, 0x00, 0x00], buf)
+    /// Serialize the packed into the provided buffer
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
+        <Self as Packet>::serialize(&[0x00, 0x00, 0x00], buf)
     }
 }
 
@@ -191,10 +194,12 @@ impl Reset {
 /// Upon receiving this, a decoder performs no new action.
 pub struct Idle;
 
+impl Packet for Idle {}
+
 impl Idle {
-    /// Serialise the packed into the provided buffer
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
-        super::serialise(&[0xff, 0x00, 0xff], buf)
+    /// Serialize the packed into the provided buffer
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
+        <Self as Packet>::serialize(&[0xff, 0x00, 0xff], buf)
     }
 }
 
@@ -208,6 +213,8 @@ pub struct BroadcastStop {
     float: bool,
 }
 
+impl Packet for BroadcastStop {}
+
 impl BroadcastStop {
     /// Bring all locomotives to an immediate stop
     pub fn immediate() -> Self {
@@ -219,11 +226,11 @@ impl BroadcastStop {
         Self { float: true }
     }
 
-    /// Serialise the packed into the provided buffer
-    pub fn serialise(&self, buf: &mut SerialiseBuffer) -> Result<usize> {
+    /// Serialize the packed into the provided buffer
+    pub fn serialize(&self, buf: &mut SerializeBuffer) -> Result<usize> {
         let instr = if self.float { 0b0101_0000 } else { 0b0100_0000 };
 
-        super::serialise(&[0x00, instr, instr], buf)
+        <Self as Packet>::serialize(&[0x00, instr, instr], buf)
     }
 }
 
@@ -231,7 +238,7 @@ impl BroadcastStop {
 mod test {
     use super::*;
 
-    fn display_serialise_buffer(buf: &SerialiseBuffer) {
+    fn display_serialize_buffer(buf: &SerializeBuffer) {
         println!("{buf:?}");
         //        15              1 8        1 8        1 8        1
         //        15              16 24      25 33      34 42      43
@@ -282,14 +289,14 @@ mod test {
     }
 
     #[test]
-    fn serialise_speed_and_direction() -> Result<()> {
+    fn serialize_speed_and_direction() -> Result<()> {
         let pkt = SpeedAndDirection::builder()
             .address(35)?
             .speed(14)?
             .direction(Direction::Forward)
             .build();
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf)?;
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf)?;
         // instruction is:
         // 01 D S SSSS
         // 01 1 1 1101
@@ -302,23 +309,23 @@ mod test {
             0b0_0_010110, // instr[7] + start + ecc[..6]
             0b11_1_00000, // ecc[6..] + stop + 5 zeroes
         ];
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43]
             .copy_from_bitslice(&expected_arr.view_bits::<Msb0>()[..43]);
         println!("got:");
-        display_serialise_buffer(&buf);
+        display_serialize_buffer(&buf);
         println!("expected:");
-        display_serialise_buffer(&expected);
+        display_serialize_buffer(&expected);
         assert_eq!(len, 43);
         assert_eq!(buf[..len], expected[..43]);
         Ok(())
     }
 
     #[test]
-    fn serialise_reset_packet() -> Result<()> {
+    fn serialize_reset_packet() -> Result<()> {
         let pkt = Reset;
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf)?;
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf)?;
 
         #[allow(clippy::unusual_byte_groupings)]
         let expected_arr = [
@@ -330,23 +337,23 @@ mod test {
             0b00_1_00000, // ecc[6..] + stop + 5 zeroes
         ];
 
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43]
             .copy_from_bitslice(&expected_arr.view_bits::<Msb0>()[..43]);
         println!("got:");
-        display_serialise_buffer(&buf);
+        display_serialize_buffer(&buf);
         println!("expected:");
-        display_serialise_buffer(&expected);
+        display_serialize_buffer(&expected);
         assert_eq!(len, 43);
         assert_eq!(buf[..len], expected[..43]);
         Ok(())
     }
 
     #[test]
-    fn serialise_idle_packet() -> Result<()> {
+    fn serialize_idle_packet() -> Result<()> {
         let pkt = Idle;
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf)?;
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf)?;
 
         #[allow(clippy::unusual_byte_groupings)]
         let expected_arr = [
@@ -358,23 +365,23 @@ mod test {
             0b11_1_00000, // ecc[6..] + stop + 5 zeroes
         ];
 
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43]
             .copy_from_bitslice(&expected_arr.view_bits::<Msb0>()[..43]);
         println!("got:");
-        display_serialise_buffer(&buf);
+        display_serialize_buffer(&buf);
         println!("expected:");
-        display_serialise_buffer(&expected);
+        display_serialize_buffer(&expected);
         assert_eq!(len, 43);
         assert_eq!(buf[..len], expected[..43]);
         Ok(())
     }
 
     #[test]
-    fn serialise_broadcast_stop_packet() -> Result<()> {
+    fn serialize_broadcast_stop_packet() -> Result<()> {
         let pkt = BroadcastStop::float();
-        let mut buf = SerialiseBuffer::default();
-        let len = pkt.serialise(&mut buf)?;
+        let mut buf = SerializeBuffer::default();
+        let len = pkt.serialize(&mut buf)?;
 
         #[allow(clippy::unusual_byte_groupings)]
         let expected_arr = [
@@ -386,13 +393,13 @@ mod test {
             0b00_1_00000, // ecc[6..] + stop + 5 zeroes
         ];
 
-        let mut expected = SerialiseBuffer::default();
+        let mut expected = SerializeBuffer::default();
         expected[..43]
             .copy_from_bitslice(&expected_arr.view_bits::<Msb0>()[..43]);
         println!("got:");
-        display_serialise_buffer(&buf);
+        display_serialize_buffer(&buf);
         println!("expected:");
-        display_serialise_buffer(&expected);
+        display_serialize_buffer(&expected);
         assert_eq!(len, 43);
         assert_eq!(buf[..len], expected[..43]);
         Ok(())

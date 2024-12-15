@@ -15,5 +15,5 @@ use-defmt = ["defmt"]
 
 [dependencies]
 bitvec = { version = "1", default-features = false }
-embedded-hal = { version = "0.2.7", features = ["unproven"] }
+embedded-hal = { version = "1.0.0" }
 defmt = { version = "0.3", optional = true }

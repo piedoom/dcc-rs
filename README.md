@@ -1,4 +1,5 @@
 # dcc-rs
+
 [![Crates.io](https://img.shields.io/crates/v/dcc-rs)](https://crates.io/crates/dcc-rs)
 [![docs.rs](https://img.shields.io/docsrs/dcc-rs)](https://docs.rs/dcc-rs)
 
@@ -22,6 +23,7 @@ holding a `RefCell<Option<_>>`, which allows external code to pop new serialised
 packets in for the interrupt handler to retrieve at its leisure.
 
 ## Status
+
 This crate currently only implements the base station (transmitter) side, and
 only the "baseline" and "service mode" packets. "Extended format" DCC packets
 are a work in progress.
@@ -30,12 +32,14 @@ DCC receiving is under future work, once the main packet types have been
 implemented.
 
 ## Example implementations
+
 * [examples/stm32f103-blue-pill](examples/stm32f103-blue-pill) Single-channel
-speed controller
+  speed controller
 * [dcc-controller-rs](https://github.com/sciguy16/dcc-controller-rs) Two channel
-speed controller
+  speed controller
 
 ## Contributing
+
 Contributions are welcome, in the form of code improvements, testing reports,
 more example implementations, more platform implementations, etc. I'm
 particularly interested in getting this running on an arduino uno/nano once
@@ -43,5 +47,6 @@ the loose ends in Rust's AVR support have been tidied up. A drop-in replacement
 `DCC++`-compatible firmware would also be neat.
 
 ## Licence
+
 This crate is available under the terms of the Mozilla Public Licence Version
 2.0.
